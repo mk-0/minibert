@@ -133,8 +133,6 @@ if __name__ == "__main__":
     for file in files:
         fp = np.memmap(file, dtype=np.uint16, mode="r").reshape(-1, sample_len)
         for i in range(0, len(fp), batch_size):  # drop the rest
-            if i == batch_size:
-                t = time.time()
             batch = unpack_batch(fp[i : i + batch_size])
             key, modelkey = jrandom.split(key)
             diff, opt_state, loss_value = step(
@@ -145,10 +143,6 @@ if __name__ == "__main__":
             gradstep = opt_state.gradient_step.item()
             ministep = opt_state.mini_step.item()
             print(f"{gradstep:5} ({ministep:3}): {loss_value.item():.10}")
-
-            if i == batch_size * 50:
-                print(time.time() - t)
-                assert 0
 
             if gradstep % cfg.training.checkpoint_frequency == 0 and ministep == 0:
                 print(f"Checkpointing at step {gradstep}")
