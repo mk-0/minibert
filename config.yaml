@@ -1,0 +1,53 @@
+tokenizer:
+  fix_text: False  # training on clean Wikipedia dataset currently
+  max_chars_per_word: 50
+  vocab_size: ${data.vocab_size}
+  min_token_frequency: 500
+  max_aplhabet_size: 100  # no need to collect a catalog of all Chinese characters from Wikipedia
+  special_tokens:
+    cls: 0
+    sep: 1
+    mask: 2
+    unk: 3
+  checkpoint_path: "tokenizer.json"
+data:
+  raw_dir: "wikipedia_raw/"
+  processed_dir: "wikipedia_processed/"
+  download_file_size: 10_000  # number of sequences per file on disk when downloading
+  validation_set_size: ${.download_file_size}  # 1 extra file
+  num_shards: 10  # number of files after dataset preparation (shuffling)
+  sequence_size: 128  # tokens per input sequence
+  vocab_size: 32768
+  mask_token: ${tokenizer.special_tokens.mask}
+  masking:  # 85% of tokens do not contribute to loss
+    mask_p: 0.12  # 80% of 15%
+    random_p: 0.015  # 10% of 15%
+    keep_p: 0.015  # 10% of 15%
+model:
+  embedding_size: 768
+  feedforward_inner_size: 3072
+  num_blocks: 12
+  num_attention_heads: 12
+optimizer:
+  warmup_share: 0.5  # Academic bert says 2%, but Cramming says 50%?
+  peak_learning_rate: 0.001  # linear one-cycle, as in https://arxiv.org/abs/1708.07120
+  beta1: 0.9
+  beta2: 0.98
+  epsilon: 1e-12
+  decay: 0.01  # decoupled as in https://arxiv.org/abs/1711.05101
+  clip_value: 0.5
+training:
+  dropout_p: 0.0  # Cramming paper says no dropout, too much data to overfit
+  batch_size: 4  # 96
+  peak_batches_accumulated: 42  # 96*42=4032 max effective batch size, linear schedule from 1
+  mixed_precision: true
+  loss_scale: 1024  # ignored if mixed_precision=False
+  expected_steps: 250000  # ????
+  validation_set_share: 0.005  # academic bert says 0.5%
+  seconds_between_validations: 1800
+  checkpoint_frequency: 1000  # gradient steps
+  checkpoint_dir: "checkpoints/"
+tuning:
+  dropout_p: 0.1
+  batch_size: 16
+  base_learning_rate: 0.00004  # with cosine decay
