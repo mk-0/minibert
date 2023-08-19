@@ -1,0 +1,11 @@
+jax==0.4.14
+optax==0.1.7
+equinox==0.10.11
+numpy==1.25.2
+omegaconf==2.3.0
+tokenizers==0.13.3
+tqdm==4.65.0
+black==23.7.0
+datasets==2.14.3
+ftfy==6.1.1
+pytest==7.4.0
