@@ -1,9 +1,10 @@
+wandb: true  # false to disable
 tokenizer:
-  fix_text: False  # training on clean Wikipedia dataset currently
+  fix_text: false  # training on clean Wikipedia dataset currently
   max_chars_per_word: 50
   vocab_size: ${data.vocab_size}
   min_token_frequency: 500
-  max_aplhabet_size: 100  # no need to collect a catalog of all Chinese characters from Wikipedia
+  max_alphabet_size: 100  # no need to collect a catalog of all Chinese characters from Wikipedia
   special_tokens:
     cls: 0
     sep: 1
@@ -13,9 +14,9 @@ tokenizer:
 data:
   raw_dir: "wikipedia_raw/"
   processed_dir: "wikipedia_processed/"
-  download_file_size: 10_000  # number of sequences per file on disk when downloading
+  download_file_size: 100_000  # number of sequences per file on disk when downloading
   validation_set_size: ${.download_file_size}  # 1 extra file
-  num_shards: 10  # number of files after dataset preparation (shuffling)
+  num_shards: 100  # number of files after dataset preparation (shuffling)
   sequence_size: 128  # tokens per input sequence
   vocab_size: 32768
   mask_token: ${tokenizer.special_tokens.mask}
@@ -38,11 +39,11 @@ optimizer:
   clip_value: 0.5
 training:
   dropout_p: 0.0  # Cramming paper says no dropout, too much data to overfit
-  batch_size: 4  # 96
+  batch_size: 96
   peak_batches_accumulated: 42  # 96*42=4032 max effective batch size, linear schedule from 1
   mixed_precision: true
-  loss_scale: 1024  # ignored if mixed_precision=False
-  expected_steps: 250000  # ????
+  loss_scale: 1024  # ignored if mixed_precisiof=false
+  expected_steps: 16203 # ????
   validation_set_share: 0.005  # academic bert says 0.5%
   seconds_between_validations: 1800
   checkpoint_frequency: 1000  # gradient steps

@@ -24,8 +24,6 @@ DIY project to teach myself JAX. Currently work in progress, the plan is to get 
 ## Tech stack
 Jax, optax, Equinox. HuggingFace datasets and tokenizers, Omegaconf for config, Weights&Biases for monitoring, numpy memmap for disk access,  Pytest for extensive unit testing.
 
-While working on this, I have found and [fixed a small bug](https://github.com/patrick-kidger/equinox/pull/288) in Equinox. I have also found a bug in Optax, but it's [been known](https://github.com/deepmind/optax/issues/377) for months already.
-
 
 ## Main reference papers
 - [Attention Is All You Need](https://arxiv.org/abs/1706.03762)

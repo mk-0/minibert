@@ -29,53 +29,57 @@ def fix_text(text):
     )
 
 
-cfg = OmegaConf.load("config.yaml")
+def build_tokenizer(cfg):
+    model = models.WordPiece(
+        unk_token="[UNK]", max_input_chars_per_word=cfg.tokenizer.max_chars_per_word
+    )
+    tokenizer = Tokenizer(model)
+    tokenizer.normalizer = normalizers.Sequence(
+        [
+            normalizers.NFKD(),  # compatibility decomposed form to minimize number of distinct characters
+            normalizers.StripAccents(),
+            normalizers.Lowercase(),
+        ]
+    )
+    tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
+        [
+            pre_tokenizers.Whitespace(),  # and punctuation boundary, "hi!! !" -> ["hi", "!!", "!"]
+            pre_tokenizers.Punctuation(behavior="isolated"),  # "???" -> ["?", "?", "?"]
+            pre_tokenizers.Digits(individual_digits=True),  # "911" -> ["9", "1", "1"]
+        ]
+    )
+    tokenizer.post_processor = processors.TemplateProcessing(
+        single="[CLS] $0 [SEP]",
+        pair="[CLS] $A [SEP] $B:1 [SEP]:1",
+        special_tokens=[
+            ("[CLS]", cfg.tokenizer.special_tokens.cls),
+            ("[SEP]", cfg.tokenizer.special_tokens.sep),
+        ],
+    )
 
-model = models.WordPiece(
-    unk_token="[UNK]", max_input_chars_per_word=cfg.tokenizer.max_chars_per_word
-)
-tokenizer = Tokenizer(model)
-tokenizer.normalizer = normalizers.Sequence(
-    [
-        normalizers.NFKD(),  # compatibility decomposed form to minimize number of distinct characters
-        normalizers.StripAccents(),
-        normalizers.Lowercase(),
-    ]
-)
-tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
-    [
-        pre_tokenizers.Whitespace(),  # and punctuation boundary, "hi!! !" -> ["hi", "!!", "!"]
-        pre_tokenizers.Punctuation(behavior="isolated"),  # "???" -> ["?", "?", "?"]
-        pre_tokenizers.Digits(individual_digits=True),  # "911" -> ["9", "1", "1"]
-    ]
-)
-tokenizer.post_processor = processors.TemplateProcessing(
-    single="[CLS] $0 [SEP]",
-    pair="[CLS] $A [SEP] $B:1 [SEP]:1",
-    special_tokens=[
-        ("[CLS]", cfg.tokenizer.special_tokens.cls),
-        ("[SEP]", cfg.tokenizer.special_tokens.sep),
-    ],
-)
+    tokenizer.decoder = decoders.WordPiece(prefix="##", cleanup=True)
+    return tokenizer
 
-tokenizer.decoder = decoders.WordPiece(prefix="##", cleanup=True)
-
-trainer = trainers.WordPieceTrainer(
-    vocab_size=cfg.tokenizer.vocab_size,  # keep merging until this size is reached
-    min_frequency=cfg.min_token_frequency,
-    limit_alphabet=cfg.max_alphabet_size,
-    special_tokens=["[CLS]", "[SEP]", "[MASK]", "[UNK]"],
-    continuing_subword_prefix="##",
-    show_progress=True,
-)
 
 if __name__ == "__main__":
     from tqdm import tqdm
     from datasets import load_dataset
 
+    cfg = OmegaConf.load("config.yaml")
+    tokenizer = build_tokenizer(cfg)
+
+    trainer = trainers.WordPieceTrainer(
+        vocab_size=cfg.tokenizer.vocab_size,  # keep merging until this size is reached
+        min_frequency=cfg.tokenizer.min_token_frequency,
+        limit_alphabet=cfg.tokenizer.max_alphabet_size,
+        special_tokens=["[CLS]", "[SEP]", "[MASK]", "[UNK]"],
+        continuing_subword_prefix="##",
+        show_progress=True,
+    )
+
     dataset = load_dataset("wikipedia", "20220301.en", split="train", streaming=True)
 
-    fix_article = fix_text if cfg.fix_text else lambda t: t
+    fix_article = fix_text if cfg.tokenizer.fix_text else lambda t: t
 
     tokenizer.train_from_iterator(
         (

@@ -1,4 +1,5 @@
 import os
+import sys
 import glob
 import time
 import random
@@ -10,10 +11,10 @@ import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jrandom
 import optax
-from omegaconf import OmegaConf
+import wandb
 from tokenizers import Tokenizer
 
-from download import unpack_batch
+from io_utils import load_config, load_batch
 from model import Bert, precision
 
 
@@ -81,7 +82,7 @@ if __name__ == "__main__":
     random.seed(420)
     key = jrandom.PRNGKey(420)
     key, subkey = jrandom.split(key)
-    cfg = OmegaConf.load("config.yaml")
+    cfg = load_config()
     os.makedirs(cfg.training.checkpoint_dir, exist_ok=True)
 
     tokenizer = Tokenizer.from_file(cfg.tokenizer.checkpoint_path)
@@ -130,30 +131,67 @@ if __name__ == "__main__":
     diff, static = eqx.partition(model, filter_trainable(model))
     opt_state = opt.init(diff)
 
+    wandb.init(
+        project="bert",
+        config={k: v for nested in cfg.values() for k, v in nested.items()},
+        notes=f"Command: {' '.join(sys.argv)}",
+        mode="online" if cfg.wandb else "disabled",
+    )
+
     for file in files:
         fp = np.memmap(file, dtype=np.uint16, mode="r").reshape(-1, sample_len)
         for i in range(0, len(fp), batch_size):  # drop the rest
-            batch = unpack_batch(fp[i : i + batch_size])
+            gradstep = opt_state.gradient_step.item()
+            ministep = opt_state.mini_step.item()
+
+            batch = load_batch(fp[i : i + batch_size])
             key, modelkey = jrandom.split(key)
             diff, opt_state, loss_value = step(
                 diff, static, scale, opt, opt_state, batch, modelkey
             )
             assert not jnp.isnan(loss_value)
-
-            gradstep = opt_state.gradient_step.item()
-            ministep = opt_state.mini_step.item()
             print(f"{gradstep:5} ({ministep:3}): {loss_value.item():.10}")
 
-            if gradstep % cfg.training.checkpoint_frequency == 0 and ministep == 0:
+            wandb.log({"loss": loss_value.item()})
+
+            if (
+                gradstep in [0, 100, 500]
+                or gradstep % cfg.training.checkpoint_frequency == 0
+            ) and ministep == 0:
+                if gradstep == 0:
+                    sample_batch = batch
+
                 print(f"Checkpointing at step {gradstep}")
                 model = eqx.combine(diff, static)
-                eqx.tree_serialise_leaves(
-                    f"{cfg.training.checkpoint_dir}/model_{gradstep}.eqx", model
-                )
-                with open(
-                    f"{cfg.training.checkpoint_dir}/optimizer_{gradstep}.pkl", "wb"
-                ) as f:
+                model_path = f"{cfg.training.checkpoint_dir}/model_{gradstep}.eqx"
+                optim_path = f"{cfg.training.checkpoint_dir}/optimizer_{gradstep}.pkl"
+                eqx.tree_serialise_leaves(model_path, model)
+                with open(optim_path, "wb") as f:
                     pickle.dump(opt_state, f)
 
+                wandb.save(model_path)
+                wandb.save(optim_path)
 
-# export LD_LIBRARY_PATH=/home/mk/miniconda3/envs/jax/lib/python3.11/site-packages/nvidia/cudnn/lib:/home/mk/miniconda3/envs/jax/lib/python3.11/site-packages/jaxlib/cuda:$LD_LIBRARY_PATH
+                key, modelkey = jrandom.split(key)
+                sample_pred = jax.vmap(model.predict_greedy, (0, None))(
+                    sample_batch["input"], modelkey
+                )
+                samples = [
+                    [tokenizer.decode(item, skip_special_tokens=False) for item in row]
+                    for row in zip(
+                        sample_batch["input"], sample_pred, sample_batch["target"]
+                    )
+                ]
+                table = wandb.Table(
+                    columns=["input", "prediction", "target"],
+                    data=[
+                        [
+                            tokenizer.decode(item, skip_special_tokens=False).replace("[MASK]", "**[MASK]**")
+                            for item in row
+                        ]
+                        for row in zip(sample_batch["input"], sample_pred, sample_batch["target"])
+                    ],
+                )
+                wandb.log({"Sample prediction": table})
+
+    wandb.finish()
