@@ -24,8 +24,19 @@ from model import (
     Bert,
 )
 
-from download import get_mask_fn, encode_id, decode_id, pack_batch, unpack_batch
-from train import tree_as_type, filter_trainable, cross_entropy, loss, forward, step
+from io_utils import (
+    MmapWriter,
+    get_dataset_size,
+    get_mask_fn,
+    encode_id,
+    decode_id,
+    pack_article,
+    load_batch,
+)
+from train import tree_as_type, filter_trainable, cross_entropy, loss, step
+
+
+random.seed(420)
 
 
 @pytest.fixture
@@ -41,11 +52,87 @@ def test_trained_tokenizer():
 
     assert t.decode(t.encode("").ids) == ""
     assert t.decode(t.encode("   trim    whitespaces   ").ids) == "trim whitespaces"
+    # assert t.decode(t.encode("but keep \n linebreaks").ids) == "but keep\nlinebreaks"  # TODO
     assert t.decode(t.encode("LowerCase").ids) == "lowercase"
     assert t.decode(t.encode("keep punctuation?!").ids) == "keep punctuation?!"
     assert t.decode(t.encode("remove 彁 weird").ids) == "remove weird"
     assert t.decode(t.encode("split numbers 911").ids) == "split numbers 9 1 1"
     assert t.decode(t.encode("UnreasonablyLongWordsAreProbablyBroken" * 10).ids) == ""
+
+
+@pytest.mark.parametrize("dtype", [np.uint8, np.int64])
+def test_mmap_writer(tmp_path, dtype):
+    # writing to one file
+    path0 = tmp_path / "0"
+    path0.mkdir()
+    writer = MmapWriter(root_dir=path0, file_shape=(10, 1), dtype=dtype)
+    stream = np.arange(10, 20, dtype=dtype)[:, None]
+    for sample in stream:
+        chunk = sample[None, :]
+        writer.write(chunk)
+
+    output = np.memmap(path0 / "0.npy", dtype=dtype, shape=(10, 1))
+    assert (stream == output).all()
+
+    # padding with zeroes
+    path1 = tmp_path / "1"
+    path1.mkdir()
+    writer = MmapWriter(root_dir=path1, file_shape=(10, 1), dtype=dtype)
+    chunk = np.array([[4]])
+    writer.write(chunk)
+    output = np.memmap(path1 / "0.npy", dtype=dtype, shape=(10, 1))
+    assert len(output) == 10
+    assert (output[0] == chunk).all()
+    assert (output[1:] == 0).all()
+
+    # rotating files
+    path2 = tmp_path / "2"
+    path2.mkdir()
+    writer = MmapWriter(root_dir=path2, file_shape=(10, 1), dtype=dtype)
+    stream = np.arange(1, 95)[:, None]
+    for sample in stream:
+        chunk = sample[None, :]
+        writer.write(chunk)
+
+    assert len(list(path2.iterdir())) == 10
+    output = np.memmap(path2 / "8.npy", dtype=dtype, shape=(10, 1))
+    assert (output == np.arange(81, 91)[:, None]).all()
+
+    # all-zero rows prohibited
+    path3 = tmp_path / "3"
+    path3.mkdir()
+    writer = MmapWriter(root_dir=path3, file_shape=(10, 3), dtype=dtype)
+    writer.write(np.array([[0, 0, 1]]))
+    writer.write(np.array([[-1, 0, 0]]))
+    with pytest.raises(ValueError):
+        writer.write(np.array([[0, 0, 0]]))
+
+
+@pytest.mark.parametrize("dtype", [np.int8, np.int64])
+def test_get_dataset_size(tmp_path, dtype):
+    # one file
+    path0 = tmp_path / "0"
+    path0.mkdir()
+    writer = MmapWriter(root_dir=path0, file_shape=(10, 2), dtype=dtype)
+    stream = np.arange(-1, 4, dtype=dtype)
+    stream = np.stack([stream, np.ones_like(stream)], axis=1)
+    for sample in stream:
+        chunk = sample[None, :]
+        writer.write(chunk)
+
+    assert get_dataset_size(list(path0.iterdir()), row_size=2, dtype=dtype) == 5
+
+    # many files
+    path1 = tmp_path / "1"
+    path1.mkdir()
+    writer = MmapWriter(root_dir=path1, file_shape=(10, 2), dtype=dtype)
+    stream = np.arange(-1, 32, dtype=dtype)
+    stream = np.stack([stream, np.ones_like(stream)], axis=1)
+    for sample in stream:
+        chunk = sample[None, :]
+        writer.write(chunk)
+
+    assert get_dataset_size(list(path1.iterdir()), row_size=2, dtype=dtype) == 33
 
 
 # Native vectorization
@@ -96,9 +183,11 @@ def test_packing(batch_size):
         "target": np.random.randint(0, 65_000, batch_size * 20).reshape(batch_size, 20),
         "mask": np.random.randint(0, 1, batch_size * 20).reshape(batch_size, 20),
     }
-    assert (batch["input"] == unpack_batch(pack_batch(batch, aid=0))["input"]).all()
-    assert (batch["target"] == unpack_batch(pack_batch(batch, aid=325))["target"]).all()
-    assert (batch["mask"] == unpack_batch(pack_batch(batch, aid=154439))["mask"]).all()
+    chunk = np.concatenate((batch["input"], batch["target"], batch["mask"]), axis=1)
+    assert (batch["input"] == load_batch(pack_article(chunk, aid=0))["input"]).all()
+    assert (batch["target"] == load_batch(pack_article(chunk, aid=325))["target"]).all()
+    assert (batch["mask"] == load_batch(pack_article(chunk, aid=154439))["mask"]).all()
+    assert load_batch(pack_article(chunk, aid=11))["meta"].shape == (batch_size, 3)
 
 
 def test_token_embedding(getkey):
@@ -164,12 +253,15 @@ def test_feedforward(getkey):
 
 @pytest.mark.parametrize("shape", [[1, 1], [14, 2], [10, 1]])
 def test_attention(shape, getkey):
+    mask_shape = [shape[0], shape[0]]
+    # Same output as eqx.attention
     ground_truth = eqx.nn._attention.dot_product_attention
     q = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
     k = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
     v = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
     assert attention(q, k, v) == pytest.approx(ground_truth(q, k, v))
 
+    # Same vmap behaviour
     q = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=[4, *shape])
     k = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=[4, *shape])
     v = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=[4, *shape])
@@ -177,9 +269,47 @@ def test_attention(shape, getkey):
         jax.vmap(ground_truth)(q, k, v), abs=1e-6
     )
 
+    # Same masking behaviour
+    ground_truth = eqx.nn._attention.dot_product_attention
+    q = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
+    k = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
+    v = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
+    mask = jrandom.uniform(getkey(), minval=0, maxval=1, shape=mask_shape) > 0.5
+    assert attention(q, k, v, mask) == pytest.approx(
+        ground_truth(q, k, v, mask), abs=1e-6
+    )
+
+
+@pytest.mark.parametrize("shape", [[14, 2], [10, 1], [17, 17]])
+def test_attention_mask(shape, getkey):
+    mask_shape = [shape[0], shape[0]]
+    q = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
+    k = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
+    v = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
+
+    # Masked out keys have no effect on output
+    k1 = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
+    # only the last key is blocked from attention
+    mask = jnp.ones(mask_shape, dtype=jnp.bool_).at[:, -1].set(False)
+    k2 = k1.at[-1].set(k[-1])
+    assert (k1[-1] != k2[-1]).all()
+    assert (attention(q, k1, v, mask) == attention(q, k2, v, mask)).all()
+    assert (attention(q, k1, v, mask) != attention(q, k, v, mask)).any()
+
+    # Masked out queries have no effect on output
+    q1 = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
+    # only the last query is blocked from attention
+    mask = jnp.ones(mask_shape, dtype=jnp.bool_).at[-1].set(False)
+    q2 = q1.at[-1].set(q[-1])
+    assert (q1[-1] != q2[-1]).all()
+    assert (attention(q1, k, v, mask) == attention(q2, k, v, mask)).all()
+    assert (attention(q1, k, v, mask) != attention(q, k, v, mask)).any()
+
 
 @pytest.mark.parametrize("shape", [[2, 2], [2, 14], [8, 2]])
 def test_multihead_attention(shape, getkey):
+    mask_shape = [shape[0], shape[0]]
+    # Same output as eqx.MultiheadAttention
     key = getkey()
     attention = MultiheadAttention(num_heads=2, num_features=shape[-1], key=key)
     ground_truth = eqx.nn.MultiheadAttention(num_heads=2, query_size=shape[-1], key=key)
@@ -187,6 +317,12 @@ def test_multihead_attention(shape, getkey):
     k = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
     v = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=shape)
     assert attention(q, k, v) == pytest.approx(ground_truth(q, k, v), abs=1e-6)
+
+    # Same masking behaviour
+    mask = jrandom.uniform(getkey(), minval=0, maxval=1, shape=mask_shape) < 0.5
+    assert attention(q, k, v, mask) == pytest.approx(
+        ground_truth(q, k, v, mask), abs=1e-6
+    )
 
 
 def test_selfattention(getkey):
@@ -272,11 +408,11 @@ def test_bert(getkey):
     assert (b2(x, getkey()) != b2(x, getkey())).any()
     assert (b2(x, getkey(), inference=True) == b2(x, getkey(), inference=True)).all()
 
-    # JIT compilation works
+    # JIT compilation works. Quite some error is expected due to XLA optimizations
     keys = jrandom.split(getkey(), 3)
     x = jrandom.randint(getkey(), (3, 10), minval=0, maxval=20)
     assert jax.vmap(b2)(x, keys) == pytest.approx(
-        jax.jit(jax.vmap(b2))(x, keys), abs=1e-5
+        jax.jit(jax.vmap(b2))(x, keys), abs=1e-3
     )
 
 

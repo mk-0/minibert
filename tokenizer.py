@@ -8,6 +8,7 @@ from tokenizers import (
     processors,
     decoders,
     trainers,
+    AddedToken,
 )
 
 
@@ -91,4 +92,5 @@ if __name__ == "__main__":
         ),
         trainer=trainer,
     )
+    # tokenizer.add_special_tokens([AddedToken("\n")])
     tokenizer.save(cfg.tokenizer.checkpoint_path)

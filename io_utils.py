@@ -1,4 +1,5 @@
 from bisect import bisect_left
+from pathlib import Path
 
 import numpy as np
 import jax.numpy as jnp
@@ -12,9 +13,10 @@ def load_config(path="config.yaml"):
 
 
 class MmapWriter:
-    def __init__(self, root_dir, file_shape):
+    def __init__(self, root_dir, file_shape, dtype=np.uint16):
         self.root_dir = root_dir
         self.file_shape = file_shape
+        self.dtype = dtype
 
         self.file = None
         self.file_num = -1
@@ -26,16 +28,22 @@ class MmapWriter:
 
         self.file = np.memmap(
             f"{self.root_dir}/{self.file_num}.npy",
-            dtype=np.uint16,
+            dtype=self.dtype,
             mode="w+",
             shape=self.file_shape,
         )
         self.cursor = 0
 
     def write(self, chunk):
+        assert len(chunk.shape) == 2
+
+        if (chunk == 0).all():
+            raise ValueError("Zero-only rows are invalid (used for paddding)")
+
         if self.file is None:
             self.rotate()
 
+        chunk = chunk.astype(self.dtype)
         next_cursor = min(self.cursor + len(chunk), len(self.file))
         # simply crop the chunk if it does not fit
         self.file[self.cursor : next_cursor] = chunk[: next_cursor - self.cursor]
@@ -83,10 +91,11 @@ def decode_id(first_part, second_part):
     return (first_part << 16) | (second_part & 0xFFFF)
 
 
-def get_dataset_size(paths, row_size):
+def get_dataset_size(paths, row_size, dtype=np.uint16):
     # Last file might be padded. The rest are full and of the same shape
-    last = np.memmap(paths[-1], dtype=np.uint16).reshape(-1, row_size)
-    last_size = bisect_left(last, 0, key=lambda x: -sum(x))
+    paths = sorted(paths, key=lambda p: int(Path(p).stem))
+    last = np.memmap(paths[-1], dtype=dtype).reshape(-1, row_size)
+    last_size = bisect_left(last, True, key=lambda x: (x == 0).all())
     total_size = (len(paths) - 1) * len(last) + last_size
     return total_size
 
@@ -112,3 +121,15 @@ def get_mask_fn(mask_token, vocab_size, mask_p, random_p, keep_p):
         return {"input": masked, "target": tokens, "mask": choice > 0}
 
     return mask
+
+
+def batched(array, batch_size, drop_last=True):
+    assert len(array) >= batch_size > 0
+    cropped_len = len(array) // batch_size * batch_size
+    cropped, rest = jnp.split(array, [cropped_len])
+
+    for i in range(0, cropped_len, batch_size):
+        yield cropped[i : i + batch_size]
+
+    if len(rest) and not drop_last:
+        yield rest

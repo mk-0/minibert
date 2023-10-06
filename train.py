@@ -39,15 +39,15 @@ def cross_entropy(logits, target):
     )
 
 
-def forward(model, batch, key, inference=False):
+def forward(model, batch, key, mask=None, inference=False):
     keys = jrandom.split(key, len(batch["input"]))
-    output = jax.vmap(model, (0, 0, None))(batch["input"], keys, inference)
+    output = jax.vmap(model, (0, 0, 0, None))(batch["input"], keys, mask, inference)
     return jax.vmap(model.project)(output)
 
 
 def loss(diff, static, batch, key, return_logits=False, inference=False):
     model = eqx.combine(diff, static)
-    logits = forward(model, batch, key, inference)
+    logits = forward(model, batch, key, inference=inference)
     tokenwise_loss = cross_entropy(logits.astype(precision.full), batch["target"])
     loss_value = jnp.average(tokenwise_loss, weights=batch["mask"])
     return (loss_value, logits) if return_logits else loss_value
@@ -74,6 +74,13 @@ def step(diff, static, scale, opt, opt_state, batch, key):
 @eqx.filter_jit
 def infer(diff, static, batch, key, return_logits=False):
     return loss(diff, static, batch, key, return_logits, inference=True)
+
+
+def fill_cloze(tokenizer, model, sentence):
+    key = jrandom.PRNGKey(0)  # unused on inference
+    tokens = tokenizer.encode(sentence).ids
+    preds = model.predict_greedy(jnp.array(tokens)[:128], key)
+    return tokenizer.decode(preds, skip_special_tokens=False)
 
 
 if __name__ == "__main__":
@@ -131,11 +138,13 @@ if __name__ == "__main__":
     diff, static = eqx.partition(model, filter_trainable(model))
     opt_state = opt.init(diff)
 
+    run_id = wandb.util.generate_id()
     wandb.init(
         project="bert",
+        id=run_id,
         config={k: v for nested in cfg.values() for k, v in nested.items()},
-        notes=f"Command: {' '.join(sys.argv)}",
-        mode="online" if cfg.wandb else "disabled",
+        notes=f"Command: {' '.join(sys.argv)} | id={run_id}",
+        mode="online" if cfg.training.wandb else "disabled",
     )
 
     for file in files:
@@ -195,3 +204,9 @@ if __name__ == "__main__":
                 wandb.log({"Sample prediction": table})
 
     wandb.finish()
+
+
+# total sequences: 31_888_534
+# total tokens: 31_888_534 * 128 = 4_081_732_352
+# total microbatches: 31_888_534 / 96 = 332_173
+# total batches: 332_173 / 24 * 2 = 27_682

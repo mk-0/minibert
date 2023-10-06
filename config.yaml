@@ -1,4 +1,3 @@
-wandb: true  # false to disable
 tokenizer:
   fix_text: false  # training on clean Wikipedia dataset currently
   max_chars_per_word: 50
@@ -40,15 +39,19 @@ optimizer:
 training:
   dropout_p: 0.0  # Cramming paper says no dropout, too much data to overfit
   batch_size: 96
-  peak_batches_accumulated: 42  # 96*42=4032 max effective batch size, linear schedule from 1
+  peak_batches_accumulated: 24  # 96*42=4032 max effective batch size, linear schedule from 1
   mixed_precision: true
-  loss_scale: 1024  # ignored if mixed_precisiof=false
-  expected_steps: 16203 # ????
+  loss_scale: 1024  # ignored if mixed_precision=false
+  expected_steps: 27682
   validation_set_share: 0.005  # academic bert says 0.5%
   seconds_between_validations: 1800
   checkpoint_frequency: 1000  # gradient steps
   checkpoint_dir: "checkpoints/"
+  wandb: true  # false to disable
 tuning:
+  dataset_dir: "MNLI_raw/MNLI/"
+  epochs: 5
   dropout_p: 0.1
   batch_size: 16
   base_learning_rate: 0.00004  # with cosine decay
+  expected_steps: 122185

@@ -62,12 +62,14 @@ class PositionEmbedding(eqx.Module):
         return self.weight[:length]
 
 
-def attention(q, k, v):
+def attention(q, k, v, mask=None):
     """
     Not using eqx.nn.MultiheadAttention to enable mixed precision for softmax
     Inputs shape: [sequence, embedding]
     """
     logits = q @ k.T / math.sqrt(q.shape[-1])
+    if mask is not None:
+        logits = jnp.where(mask, logits, jnp.finfo(logits.dtype).min)
     weights = full_precision(jax.nn.softmax)(logits, axis=-1)
     return weights @ v
 
@@ -92,12 +94,12 @@ class MultiheadAttention(eqx.Module):
         self.v_proj = eqx.nn.Linear(num_features, num_features, use_bias=False, key=vk)
         self.o_proj = eqx.nn.Linear(num_features, num_features, use_bias=False, key=ok)
 
-    def __call__(self, q, k, v):
+    def __call__(self, q, k, v, mask=None):
         feat_per_head = self.num_features // self.num_heads
         q = jax.vmap(self.q_proj)(q).reshape(-1, self.num_heads, feat_per_head)
         k = jax.vmap(self.k_proj)(k).reshape(-1, self.num_heads, feat_per_head)
         v = jax.vmap(self.v_proj)(v).reshape(-1, self.num_heads, feat_per_head)
-        output = jax.vmap(attention, in_axes=1, out_axes=1)(q, k, v)
+        output = jax.vmap(attention, in_axes=(1, 1, 1, None), out_axes=1)(q, k, v, mask)
         return jax.vmap(self.o_proj)(output.reshape(-1, self.num_features))
 
 
@@ -112,12 +114,12 @@ class ResNormAttention(eqx.Module):
         self.layernorm = eqx.nn.LayerNorm(num_features)
         self.dropout = eqx.nn.Dropout(dropout_p)
 
-    def __call__(self, x, key, inference=False):
+    def __call__(self, x, key, mask=None, inference=False):
         # https://arxiv.org/abs/2002.04745
         # Normalizing before residual (like in ResNet) improves the gradient flow
         # Otherwise (original Transformer) layernorm distorts residual connections
         z = jax.vmap(full_precision(self.layernorm))(x)
-        z = self.attention(z, z, z)
+        z = self.attention(z, z, z, mask)
         return x + self.dropout(z, key=key, inference=inference)
 
 
@@ -174,9 +176,9 @@ class Block(eqx.Module):
             key=k2,
         )
 
-    def __call__(self, x, key, inference=False):
+    def __call__(self, x, key, mask=None, inference=False):
         k1, k2 = jrandom.split(key)
-        x = self.selfattention(x, key=k1, inference=inference)
+        x = self.selfattention(x, key=k1, mask=mask, inference=inference)
         # applying feedforward block independently to every position in a sequence
         positionwise_ff = jax.vmap(self.feedforward, (0, 0, None))
         return positionwise_ff(x, jrandom.split(k2, x.shape[0]), inference)
@@ -232,7 +234,7 @@ class Bert(eqx.Module):
         # Divide output embedding layers by sqrt(d_model)
         self.output_temperature = math.sqrt(num_features)
 
-    def __call__(self, x, key, inference=False):
+    def embed(self, x, key, inference=False):
         """
         Why is it ok to add positional embedding to token embedding
          instead of concatenating them to ensure that they are orthogonal?
@@ -243,14 +245,16 @@ class Bert(eqx.Module):
         i.e. the same matrix now simply considers more factors
         Also they are probably almost orthogonal anyway
         """
-        k1, k2 = jrandom.split(key)
-
         x = self.token_embedding(x) + self.position_embedding(x.shape[0])
         x = jax.vmap(full_precision(self.initial_layernorm))(x)
-        x = self.dropout(x, key=k1, inference=inference)
+        x = self.dropout(x, key=key, inference=inference)
+        return x
 
+    def __call__(self, x, key, mask=None, inference=False):
+        k1, k2 = jrandom.split(key)
+        x = self.embed(x, key=k1, inference=inference)
         for block, bkey in zip(self.blocks, jrandom.split(k2, len(self.blocks))):
-            x = block(x, key=bkey, inference=inference)
+            x = block(x, key=bkey, mask=mask, inference=inference)
         return jax.vmap(full_precision(self.final_layernorm))(x)
 
     def project(self, x):
@@ -260,6 +264,22 @@ class Bert(eqx.Module):
 
     def predict_greedy(self, sample, key):
         return self.project(self(sample, key=key, inference=True)).argmax(-1)
+
+
+class BertClassifier(eqx.Module):
+    bert: eqx.Module
+    head: eqx.nn.Linear
+
+    def __init__(self, bert, num_classes, key):
+        super().__init__()
+        token_size = bert.token_embedding.weight.shape[1]
+        self.bert = bert
+        self.head = eqx.nn.Linear(token_size, num_classes, use_bias=False, key=key)
+
+    def __call__(self, sequence, key, mask, inference=False):
+        tokens = self.bert(sequence, key=key, mask=mask, inference=inference)
+        cls_token = tokens[0]
+        return self.head(cls_token)
 
 
 if __name__ == "__main__":

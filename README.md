@@ -37,3 +37,5 @@ Jax, optax, Equinox. HuggingFace datasets and tokenizers, Omegaconf for config, 
 - [Scaling Laws for Neural Language Models](https://arxiv.org/abs/2001.08361)
 - [The Pile: An 800GB Dataset of Diverse Text for Language Modeling](https://arxiv.org/abs/2101.00027)
 - [What the BookCorpus?](https://gist.github.com/alvations/4d2278e5a5fbcf2e07f49315c4ec1110)
+- [GLUE: A Multi-Task Benchmark and Analysis Platform for Natural Language Understanding](https://arxiv.org/abs/1804.07461)
+- [A Broad-Coverage Challenge Corpus for Sentence Understanding through Inference](https://arxiv.org/abs/1704.05426)
