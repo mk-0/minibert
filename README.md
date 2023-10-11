@@ -11,6 +11,8 @@ DIY project to teach myself JAX. Currently work in progress, the plan is to get 
 
  Current **MNLI scores (m/mm): 80.7 / 80.0**, as reported by the [GLUE dashboard](https://gluebenchmark.com/leaderboard).
 
+Training overview can be found in the [training log](log.md).
+
 
 ## Architectural changes
 - No NSP loss, as it does not help performance (see papers below)

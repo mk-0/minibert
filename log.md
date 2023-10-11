@@ -18,7 +18,7 @@
 ### Raw
 | Input | Output |
 --|--|
-| "I **[MASK]** taking **[MASK]** nap." | "I **am** taking **a** nap. |
+| I **[MASK]** taking **[MASK]** nap. | I **am** taking **a** nap. |
 | George Washington was the first **[MASK]** of the United **[MASK]** of America | george washington was the first **president** of the united **states** of america |
 | China is the most **[MASK]** country in the world. | china is the most **populous** country in the world. |
 | Thermodynamics is an area of **[MASK]**. It studies **[MASK]** and related processes | thermodynamics is an area of **mathematics**. it studies **processes** and related processes |
@@ -50,7 +50,7 @@
 ### Raw
 | Input | Output |
 --|--|
-| "I **[MASK]** taking **[MASK]** nap." | "I **am** taking **a** nap. |
+| I **[MASK]** taking **[MASK]** nap. | I **am** taking **a** nap. |
 | George Washington was the first **[MASK]** of the United **[MASK]** of America | george washington was the first **president** of the united **states** of america |
 | China is the most **[MASK]** country in the world. | china is the most **powerful** country in the world. |
 | Thermodynamics is an area of **[MASK]**. It studies **[MASK]** and related processes | thermodynamics is an area of **study**. it studies **processes** and related processes |
