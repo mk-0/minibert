@@ -37,7 +37,7 @@
 
 # Run 2 (07.10 Sun)
 * **Differences:** New dataset (and fresh tokenizer)
-* **Commit**: head
+* **Commit**: f78bf4c
 * **Run**: https://wandb.ai/mkitov/bert/runs/pra81pkn?workspace=user-mkitov
 * **Data**: 30% of books3 (7,334,400,000 tokens)
 * **Result**: Converged after 19 hours.
