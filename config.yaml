@@ -5,14 +5,14 @@ tokenizer:
   min_token_frequency: 500
   max_alphabet_size: 100  # no need to collect a catalog of all Chinese characters from Wikipedia
   special_tokens:
-    cls: 0
-    sep: 1
-    mask: 2
-    unk: 3
-  checkpoint_path: "tokenizer.json"
+    cls: 101
+    sep: 102
+    mask: 103
+    unk: 100
+  checkpoint_path: "bert_pretrained.json"
 data:
-  raw_dir: "wikipedia_raw/"
-  processed_dir: "wikipedia_processed/"
+  raw_dir: "pile_raw/"
+  processed_dir: "pile_processed/"
   download_file_size: 100_000  # number of sequences per file on disk when downloading
   validation_set_size: ${.download_file_size}  # 1 extra file
   num_shards: 100  # number of files after dataset preparation (shuffling)
@@ -38,20 +38,21 @@ optimizer:
   clip_value: 0.5
 training:
   dropout_p: 0.0  # Cramming paper says no dropout, too much data to overfit
-  batch_size: 96
-  peak_batches_accumulated: 24  # 96*42=4032 max effective batch size, linear schedule from 1
+  batch_size: 128
+  peak_batches_accumulated: 32  # 128*32=4096 max effective batch size, linear schedule from 1
   mixed_precision: true
   loss_scale: 1024  # ignored if mixed_precision=false
-  expected_steps: 27682
-  validation_set_share: 0.005  # academic bert says 0.5%
-  seconds_between_validations: 1800
+  expected_steps: 28881
   checkpoint_frequency: 1000  # gradient steps
   checkpoint_dir: "checkpoints/"
   wandb: true  # false to disable
 tuning:
-  dataset_dir: "MNLI_raw/MNLI/"
+  init_checkpoint: ???
+  dataset_dir: "MNLI/"
   epochs: 5
   dropout_p: 0.1
   batch_size: 16
   base_learning_rate: 0.00004  # with cosine decay
   expected_steps: 122185
+evaluation:
+  checkpoint: ???

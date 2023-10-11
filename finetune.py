@@ -20,9 +20,6 @@ from model import Bert, BertClassifier, precision
 from train import cross_entropy
 
 
-precision.half = jnp.float32
-
-
 def filter_trainable(model):
     frozen = [
         model.bert.position_embedding.weight,
@@ -30,23 +27,19 @@ def filter_trainable(model):
     return lambda leaf: eqx.is_array(leaf) and not any(leaf is f for f in frozen)
 
 
-def load_mnli(paths, tokenizer, label=True):
-    cols = ["sentence1", "sentence2"]
-    if label:
-        cols.append("gold_label")
+def load_mnli(paths, tokenizer):
+    cols = ["sentence1", "sentence2", "gold_label"]
     dfs = [pd.read_csv(p, sep="\t", usecols=cols) for p in paths]
     df = pd.concat(dfs, axis=0, ignore_index=True)
     valid = df[(df.sentence1.str.len() < 1000) & (df.sentence2.str.len() < 1000)]
     valid = valid.sample(frac=1)
     sentences = valid[["sentence1", "sentence2"]].values.tolist()
     batch = jnp.asarray([s.ids for s in tokenizer.encode_batch(sentences)])
-    if label:
-        labels = valid["gold_label"].replace(
-            {"neutral": 0, "entailment": 1, "contradiction": 2}
-        )
-        labels = jnp.asarray(labels.to_numpy())
-        return batch, labels
-    return batch
+    labels = valid["gold_label"].replace(
+        {"neutral": 0, "entailment": 1, "contradiction": 2}
+    )
+    labels = jnp.asarray(labels.to_numpy())
+    return batch, labels
 
 
 def forward(model, x, mask, key, inference=False):
@@ -60,6 +53,16 @@ def loss(diff, static, x, y, mask, key, inference=False):
     logits = forward(model, x, mask, key, inference=inference)
     accuracy = logits.argmax(-1) == y
     return cross_entropy(logits, y).mean(), accuracy.mean()
+
+
+@eqx.filter_jit
+def step(diff, static, opt, opt_state, x, y, mask, key):
+    (loss_value, accuracy), grads = eqx.filter_value_and_grad(loss, has_aux=True)(
+        diff, static, x, y, mask, key
+    )
+    updates, opt_state = opt.update(grads, opt_state, diff)
+    diff = eqx.apply_updates(diff, updates)
+    return diff, opt_state, loss_value, accuracy
 
 
 def make_key_mask(tokens, pad_token):
@@ -93,20 +96,10 @@ def classify(cfg, tokenizer, model, pair):
     return {
         label: round(prob.item(), 3)
         for label, prob in sorted(
-            zip(["neutral", "entailment", "conctradiction"], probabilities),
+            zip(["neutral", "entailment", "contradiction"], probabilities),
             key=lambda label_and_prob: -label_and_prob[1],
         )
     }
-
-
-@eqx.filter_jit
-def step(diff, static, opt, opt_state, x, y, mask, key):
-    (loss_value, accuracy), grads = eqx.filter_value_and_grad(loss, has_aux=True)(
-        diff, static, x, y, mask, key
-    )
-    updates, opt_state = opt.update(grads, opt_state, diff)
-    diff = eqx.apply_updates(diff, updates)
-    return diff, opt_state, loss_value, accuracy
 
 
 if __name__ == "__main__":
@@ -132,7 +125,7 @@ if __name__ == "__main__":
         key=bertkey,
     )
 
-    bert = eqx.tree_deserialise_leaves("checkpoints/run1/model_14000.eqx", bert)
+    bert = eqx.tree_deserialise_leaves(cfg.tuning.init_checkpoint, bert)
     bert = reset_dropout_p(bert, cfg.tuning.dropout_p)
 
     model = BertClassifier(bert, num_classes=3, key=clfkey)

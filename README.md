@@ -2,8 +2,8 @@
 
 DIY project to teach myself JAX. Currently work in progress, the plan is to get original BERT performance with clean architecture built from scratch and low (personal) budget for training.
 
-- Training on English Wikipedia (might add samples from books3). BookCorpus is bad (see below)
-- Finetuning on GLUE tasks (TBD)
+- Training on English Wikipedia (might add samples from books3). Original BookCorpus is not a good dataset (see below)
+- Finetuning on GLUE tasks (MNLI currently)
 - Tokenizer trained from scratch
 
 ## Checkpoints & training logs
@@ -18,7 +18,7 @@ DIY project to teach myself JAX. Currently work in progress, the plan is to get 
 - Gradient accumulation to fit larger batch sizes, linear batch-size schedule (rationale: gradient noise scale, see below)
 - One Cycle learning rate schedule for efficient training under constrained budget
 - Mixed precision with loss scaling
-- Trining the tokenizer using HuggingFace WordPiece training algorithm, which is actually just BPE. Inference rules are still from WordPiece
+- Trianing the tokenizer using HuggingFace WordPiece training algorithm, which is actually just BPE. Inference rules are still from WordPiece
 
 
 ## Tech stack

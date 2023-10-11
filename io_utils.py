@@ -35,6 +35,9 @@ class MmapWriter:
         self.cursor = 0
 
     def write(self, chunk):
+        if not len(chunk):
+            return
+
         assert len(chunk.shape) == 2
 
         if (chunk == 0).all():

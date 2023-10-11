@@ -104,14 +104,15 @@ if __name__ == "__main__":
         dropout_p=cfg.training.dropout_p,
         key=subkey,
     )
-    opt = optax.chain(
+    lr_schedule = optax.linear_onecycle_schedule(
+        transition_steps=cfg.training.expected_steps,
+        peak_value=cfg.optimizer.peak_learning_rate,
+        pct_start=cfg.optimizer.warmup_share,
+    )
+    base_opt = optax.chain(
         optax.clip(cfg.optimizer.clip_value),
         optax.adamw(
-            learning_rate=optax.linear_onecycle_schedule(
-                transition_steps=cfg.training.expected_steps,
-                peak_value=cfg.optimizer.peak_learning_rate,
-                pct_start=cfg.optimizer.warmup_share,
-            ),
+            learning_rate=lr_schedule,
             b1=cfg.optimizer.beta1,
             b2=cfg.optimizer.beta2,
             eps=cfg.optimizer.epsilon,
@@ -121,7 +122,7 @@ if __name__ == "__main__":
     accumulation_rate = (
         cfg.training.peak_batches_accumulated / cfg.training.expected_steps
     )
-    opt = optax.MultiSteps(opt, lambda step: step * accumulation_rate)
+    opt = optax.MultiSteps(base_opt, lambda step: step * accumulation_rate)
 
     files = glob.glob(f"{cfg.data.processed_dir}/*.npy")
     random.shuffle(files)
@@ -170,6 +171,8 @@ if __name__ == "__main__":
                 if gradstep == 0:
                     sample_batch = batch
 
+                wandb.log({"Learning rate": lr_schedule(gradstep).item()})
+
                 print(f"Checkpointing at step {gradstep}")
                 model = eqx.combine(diff, static)
                 model_path = f"{cfg.training.checkpoint_dir}/model_{gradstep}.eqx"
@@ -177,9 +180,6 @@ if __name__ == "__main__":
                 eqx.tree_serialise_leaves(model_path, model)
                 with open(optim_path, "wb") as f:
                     pickle.dump(opt_state, f)
-
-                wandb.save(model_path)
-                wandb.save(optim_path)
 
                 key, modelkey = jrandom.split(key)
                 sample_pred = jax.vmap(model.predict_greedy, (0, None))(
@@ -206,7 +206,14 @@ if __name__ == "__main__":
     wandb.finish()
 
 
-# total sequences: 31_888_534
-# total tokens: 31_888_534 * 128 = 4_081_732_352
-# total microbatches: 31_888_534 / 96 = 332_173
-# total batches: 332_173 / 24 * 2 = 27_682
+# Wikipedia:
+# total sequences: 30_087_484
+# total tokens: 30_087_484 * 128 = 3_851_197_952
+# total microbatches: 30_087_484 / 128 = 235_059
+# total batches: 235_059 / 31 * 2 = 15_165
+
+# Books3 subset:
+# total sequences: 57_300_000
+# total tokens: 57_300_000 * 128 = 7_334_400_000
+# total microbatches: 57_300_000 / 128 = 447_657
+# total batches: 447_657 / 31 * 2 = 28_881

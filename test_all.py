@@ -34,9 +34,10 @@ from io_utils import (
     load_batch,
 )
 from train import tree_as_type, filter_trainable, cross_entropy, loss, step
+from finetune import make_key_mask, reset_dropout_p
 
 
-random.seed(420)
+random.seed(42)
 
 
 @pytest.fixture
@@ -106,6 +107,19 @@ def test_mmap_writer(tmp_path, dtype):
     writer.write(np.array([[-1, 0, 0]]))
     with pytest.raises(ValueError):
         writer.write(np.array([[0, 0, 0]]))
+
+    # empty chunks allowed
+    path4 = tmp_path / "4"
+    path4.mkdir()
+    writer = MmapWriter(root_dir=path4, file_shape=(3, 1), dtype=dtype)
+    writer.write(np.array([[1]]))
+    for _i in range(10):
+        writer.write(np.array([]))
+
+    writer.write(np.array([[2]]))
+    writer.write(np.array([[3]]))
+    output = np.memmap(path4 / "0.npy", dtype=dtype, shape=(3, 1))
+    assert (output == np.array([[1], [2], [3]])).all()
 
 
 @pytest.mark.parametrize("dtype", [np.int8, np.int64])
@@ -325,6 +339,30 @@ def test_multihead_attention(shape, getkey):
     )
 
 
+def test_make_key_mask(getkey):
+    attention = MultiheadAttention(num_heads=3, num_features=15, key=getkey())
+    q = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=[10, 15])
+    v = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=[10, 15])
+
+    key_start = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=[5, 15])
+    pad1 = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=[5, 15])
+    pad2 = jrandom.uniform(getkey(), minval=-1, maxval=1, shape=[5, 15])
+    k1 = jnp.concatenate([key_start, pad1], axis=0)
+    k2 = jnp.concatenate([key_start, pad2], axis=0)
+    mask_nothing = make_key_mask(jnp.array([1] * 10), 0)
+    mask_padding = make_key_mask(jnp.array([1] * 5 + [0] * 5), 0)
+
+    assert (attention(q, k1, v) != attention(q, k2, v)).any()
+
+    # No effect with true-only mask
+    assert (attention(q, k1, v, mask_nothing) == attention(q, k1, v)).all()
+
+    # No effect from masked items
+    assert (
+        attention(q, k1, v, mask_padding) == attention(q, k2, v, mask_padding)
+    ).all()
+
+
 def test_selfattention(getkey):
     # Deterministic without dropout
     a = ResNormAttention(num_heads=2, num_features=4, dropout_p=0.0, key=getkey())
@@ -433,6 +471,28 @@ def test_crossentropy():
 
     # Native vectorization
     assert (jax.vmap(cross_entropy)(logits, target) == out).all()
+
+
+def test_reset_dropout(getkey):
+    bert = Bert(
+        vocab_size=20,
+        sequence_size=20,
+        num_blocks=3,
+        num_attention_heads=2,
+        num_features=16,
+        num_feedforward_features=16,
+        dropout_p=0.5,
+        key=getkey(),
+    )
+
+    x = jrandom.randint(getkey(), (10,), minval=0, maxval=20)
+    k1 = getkey()
+    k2 = getkey()
+
+    assert (bert(x, key=k1) != bert(x, key=k2)).any()
+    bert = reset_dropout_p(bert, 0)
+
+    assert (bert(x, key=k1) == bert(x, key=k2)).all()
 
 
 def test_gradient_mask(getkey):
