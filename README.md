@@ -7,7 +7,9 @@ DIY project to teach myself JAX. Currently work in progress, the plan is to get 
 - Tokenizer trained from scratch
 
 ## Checkpoints & training logs
- TBD
+ Raw and finetuned checkpoints can be downloaded with git LFS.
+
+ Current **MNLI scores (m/mm): 80.7 / 80.0**, as reported by the [GLUE dashboard](https://gluebenchmark.com/leaderboard).
 
 
 ## Architectural changes
