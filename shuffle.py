@@ -10,6 +10,16 @@ from tqdm import tqdm
 from io_utils import get_mask_fn, get_dataset_size
 
 
+def reader(paths, row_len):
+    for p in paths:
+        memmap = np.memmap(p, dtype=np.uint16).reshape(-1, row_len)
+        meta, tokens = np.split(memmap, [3], axis=1)
+        batch = mask(tokens)
+        yield from np.concatenate(
+            (meta, batch["input"], batch["target"], batch["mask"]), axis=1
+        )
+
+
 # See https://blog.janestreet.com/how-to-shuffle-a-big-dataset/
 # The only catch is that we need to know file sizes in advance for memmap
 if __name__ == "__main__":
@@ -45,15 +55,6 @@ if __name__ == "__main__":
         )
         for i in range(cfg.data.num_shards)
     ]
-
-    def reader(paths, row_len):
-        for p in paths:
-            memmap = np.memmap(p, dtype=np.uint16).reshape(-1, row_len)
-            meta, tokens = np.split(memmap, [3], axis=1)
-            batch = mask(tokens)
-            yield from np.concatenate(
-                (meta, batch["input"], batch["target"], batch["mask"]), axis=1
-            )
 
     counters = defaultdict(int)
     for i, row in tqdm(

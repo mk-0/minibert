@@ -185,12 +185,6 @@ if __name__ == "__main__":
                 sample_pred = jax.vmap(model.predict_greedy, (0, None))(
                     sample_batch["input"], modelkey
                 )
-                samples = [
-                    [tokenizer.decode(item, skip_special_tokens=False) for item in row]
-                    for row in zip(
-                        sample_batch["input"], sample_pred, sample_batch["target"]
-                    )
-                ]
                 table = wandb.Table(
                     columns=["input", "prediction", "target"],
                     data=[

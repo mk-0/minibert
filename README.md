@@ -1,8 +1,8 @@
 # Minimalistic BERT in Jax
 
-DIY project to teach myself JAX. Currently work in progress, the plan is to get original BERT performance with clean architecture built from scratch and low (personal) budget for training.
+DIY project to teach myself JAX. Currently work in progress, the plan is to get the original BERT performance with a clean architecture built from scratch and a low (personal) budget for training.
 
-- Training on English Wikipedia (might add samples from books3). Original BookCorpus is not a good dataset (see below)
+- Training on English Wikipedia and Books3. Original BookCorpus is not a good dataset (see below)
 - Finetuning on GLUE tasks (MNLI currently)
 - Tokenizer trained from scratch
 
