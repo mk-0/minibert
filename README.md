@@ -1,4 +1,4 @@
-# Minimalist BERT in Jax
+# Minimal BERT in Jax
 
 A DIY project to teach myself JAX. Currently work in progress, the plan is to get the original BERT performance with a clean architecture built from scratch and a low (personal) budget for training.
 
